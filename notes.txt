@@ -1,0 +1,59 @@
+
+
+    1) If there is a previously-freed chunk of memory, and that chunk is big enough to service the request, 
+    the heap manager will use that freed chunk for the new allocation.
+    2) Otherwise, if there is available space at the top of the heap, 
+    the heap manager will allocate a new chunk out of that available space and use that.
+    3) Otherwise, the heap manager will ask the kernel to add new memory to the end of the heap, 
+    and then allocates a new chunk from this newly allocated space.
+    4) If all these strategies fail, the allocation can’t be serviced, and malloc returns NULL.
+
+
+1    A check that the allocation is aligned on an 8-byte (or 16-byte on 64-bit) boundary, since malloc ensures all allocations are aligned.
+2    A check that the chunk’s size field isn’t impossible–either because it is too small, too large, not an aligned size, or would overlap the end of the process’ address space.
+3    A check the chunk lies within the boundaries of the arena.
+4    A check that the chunk is not already marked as free by checking the corresponding “P” bit that lies in the metadata at the start of the next chunk.
+
+Recall, the basic algorithm for free is as follows:
+
+    If the chunk has the M bit set in the metadata, the allocation was allocated off-heap and should be munmaped.
+    Otherwise, if the chunk before this one is free, the chunk is merged backwards to create a bigger free chunk.
+    Similarly, if the chunk after this one is free, the chunk is merged forwards to create a bigger free chunk.
+    If this potentially-larger chunk borders the “top” of the heap, the whole chunk is absorbed into the end of the heap, rather than stored in a “bin”.
+    Otherwise, the chunk is marked as free and placed in an appropriate bin
+
+
+    First, every allocation exists as a memory chunk which is aligned and contains metadata as well as the region the programmer wants. When a programmer requests memory from the heap, the heap manager first works out what chunk size the allocation request corresponds to, and then searches for the memory in the following order:
+
+        If the size corresponds with a tcache bin and there is a tcache chunk available, return that immediately.
+        If the request is enormous allocate a chunk off-heap via mmap.
+        Otherwise we obtain the arena heap lock and then perform the following strategies, in order:
+            Try the fastbin/smallbin recycling strategy
+                If a corresponding fast bin exists, try and find a chunk from there (and also opportunistically prefill the tcache with entries from the fast bin).
+                Otherwise, if a corresponding small bin exists, allocate from there (opportunistically prefilling the tcache as we go).
+
+            Resolve all the deferred frees
+                Otherwise “truly free” the entries in the fast-bins and move their consolidated chunks to the unsorted bin.
+                Go through each entry in the unsorted bin. If it is suitable, stop. Otherwise, put the unsorted entry on its corresponding small/large bin as we go (possibly promoting small entries to the tcache as we go).
+            Default back to the basic recycling strategy
+                If the chunk size corresponds with a large bin, search the corresponding large bin now.
+            Create a new chunk from scratch
+                Otherwise, there are no chunks available, so try and get a chunk from the top of the heap.
+                If the top of the heap is not big enough, extend it using sbrk.
+                If the top of the heap can’t be extended because we ran into something else in the address space, create a discontinuous extension using mmap and allocate from there
+            If all else fails, return NULL.
+
+And the corresponding free strategy:
+
+    If the pointer is NULL, the C standard defines the behavior as “do nothing”.
+    Otherwise, convert the pointer back to a chunk by subtracting the size of the chunk metadata.
+    Perform a few sanity checks on the chunk, and abort if the sanity checks fail.
+    If the chunk fits into a tcache bin, store it there.
+    If the chunk has the M bit set, give it back to the operating system via munmap.
+    Otherwise we obtain the arena heap lock and then:
+        If the chunk fits into a fastbin, put it on the corresponding fastbin, and we’re done.
+        If the chunk is > 64KB, consolidate the fastbins immediately and put the resulting merged chunks on the unsorted bin.
+        Merge the chunk backwards and forwards with neighboring freed chunks in the small, large, and unsorted bins.
+        If the resulting chunk lies at the top of the heap, merge it into the top of the heap rather than storing it in a bin.
+        Otherwise store it in the unsorted bin. (Malloc will later do the work to put entries from the unsorted bin into the small or large bins).
+

@@ -1,42 +1,55 @@
-INCLUDE 	= -Iinclude
 
-CFLAGS = -Wall -Wextra -Werror $(INCLUDE) -fpic 
+CC = gcc
+INCLUDE = -Iinclude
+CFLAGS = -g -Wall -Wextra -Werror $(INCLUDE) -fPIC
 
 ifeq ($(HOSTTYPE),)
-HOSTTYPE := $(shell uname -m)_$(shell uname -s)
+	HOSTTYPE := $(shell uname -m)_$(shell uname -s)
 endif
 
-NAME = libft_malloc_$(HOSTTYPE).so
-LIB_NAME = ft_malloc_$(HOSTTYPE)
+PWD = $(shell pwd)
+
+NAME = malloc
+LIB_FULL_NAME = libft_malloc_$(HOSTTYPE).so
+LINK_NAME = libft_malloc.so
+TEST_NAME = mtest
+LIB_NAME = ft_malloc
 
 SRC_DIR = ./src
+OBJ_DIR = ./obj
+LIB_DIR = $(PWD)/lib
 
-MY_SOURCES = $(SRC_DIR)/main.c 
+MY_SOURCES = $(SRC_DIR)/sballoc.c
 
-MY_OBJECTS = $(MY_SOURCES:.c=.o)
+
+MY_OBJECTS = $(MY_SOURCES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 all: $(NAME)
 
-
 $(NAME): $(MY_OBJECTS)
-	@gcc -shared -o $(NAME) $(MY_OBJECTS)
-	@echo "$(NAME) compiled."
+	@mkdir -p $(LIB_DIR)
+	@$(CC) -shared -o $(LIB_DIR)/$(LIB_FULL_NAME) $(MY_OBJECTS)
+	@ln -s $(LIB_FULL_NAME) $(LIB_DIR)/$(LINK_NAME)
+	@echo "Shared library built: $(LIB_FULL_NAME)"
+	@echo "Symlink created: $(LINK_NAME)"
 
-%.o :%.c
-	@cc $(CFLAGS) -c $< -o $@ 
-	@echo "$< compiled."
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(OBJ_DIR)
+	@$(CC) $(CFLAGS) -c $< -o $@
+	@echo "Compiled: $<"
 
 clean:
-	@$(RM) $(MY_OBJECTS) $(MY_OBJECTS_BONUS)
-	@echo "Objects files removed."
+	@rm -rf $(OBJ_DIR)
+	@echo "Object directory removed."
 
 fclean: clean
-	@$(RM) $(NAME)
-	@echo "$(NAME) removed."
-
-test: all
-	gcc test.c -Wl,-rpath=$(pwd) -L./ -l$(LIB_NAME) -o maltest
+	@rm -rf $(LIB_DIR) $(TEST_NAME) $(LINK_NAME)
+	@echo "Library and test removed."
 
 re: fclean all
 
-.PHONY: all clean fclean re 
+test: re
+	@$(CC) -g  mtest.c -L$(LIB_DIR) -l$(LIB_NAME) -Wl,-rpath=$(abspath $(LIB_DIR)) -o $(TEST_NAME)
+	@echo "Test program built: ./$(TEST_NAME)"
+
+.PHONY: all clean fclean re test
